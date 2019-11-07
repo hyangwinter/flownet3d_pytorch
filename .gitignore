@@ -1,0 +1,6 @@
+__pycache__/
+.vscode/
+checkpoints/
+build/
+dist/
+pointnet2.egg-info/
