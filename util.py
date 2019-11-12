@@ -101,9 +101,9 @@ def knn_point(k, pos1, pos2):
     M = pos2.shape[1]
     pos1 = pos1.view(B,1,N,-1).repeat(1,M,1,1)
     pos2 = pos2.view(B,M,1,-1).repeat(1,1,N,1)
-    dist = torch.sum((pos1-pos2)**2,-1)
+    dist = torch.sum(-(pos1-pos2)**2,-1)
     val,idx = dist.topk(k=k,dim = -1)
-    return val, idx
+    return -val, idx
 
 
 def query_ball_point(radius, nsample, xyz, new_xyz):
@@ -186,15 +186,19 @@ class PointNetSetAbstraction(nn.Module):
         self.npoint = npoint
         self.radius = radius
         self.nsample = nsample
+        self.group_all = group_all
         self.mlp_convs = nn.ModuleList()
         self.mlp_bns = nn.ModuleList()
-        last_channel = in_channel+3
+        last_channel = in_channel+3   # TODO：
         for out_channel in mlp:
-            self.mlp_convs.append(nn.Conv2d(last_channel, out_channel, 1))
+            self.mlp_convs.append(nn.Conv2d(last_channel, out_channel, 1, bias = False))
             self.mlp_bns.append(nn.BatchNorm2d(out_channel))
             last_channel = out_channel
         
-        self.group_all = group_all
+        if group_all:
+            self.queryandgroup = pointutils.GroupAll()
+        else:
+            self.queryandgroup = pointutils.QueryAndGroup(radius, nsample)
 
     def forward(self, xyz, points):
         """
@@ -207,24 +211,25 @@ class PointNetSetAbstraction(nn.Module):
         """
         device = xyz.device
         B, C, N = xyz.shape
-        xyz = xyz.permute(0, 2, 1).contiguous()
-        if points is not None:
-            points = points.permute(0, 2, 1).contiguous()
+        xyz_t = xyz.permute(0, 2, 1).contiguous()
+        # if points is not None:
+        #     points = points.permute(0, 2, 1).contiguous()
 
         # 选取邻域点
-        if self.group_all:
-            new_xyz, new_points = sample_and_group_all(xyz, points)
+        if self.group_all == False:
+            fps_idx = pointutils.furthest_point_sample(xyz_t, self.npoint)  # [B, N]
+            new_xyz = pointutils.gather_operation(xyz, fps_idx)  # [B, C, N]
         else:
-            new_xyz, new_points = sample_and_group(self.npoint, self.radius, self.nsample, xyz, points)
-        # new_xyz: sampled points position data, [B, npoint, C]
-        # new_points: sampled points data, [B, npoint, nsample, C+D]
-        new_points = new_points.permute(0, 3, 2, 1) # [B, C+D, nsample,npoint]
+            new_xyz = xyz
+        new_points = self.queryandgroup(xyz_t, new_xyz.transpose(2, 1).contiguous(), points) # [B, 3+C, N, S]
+        
+        # new_xyz: sampled points position data, [B, C, npoint]
+        # new_points: sampled points data, [B, C+D, npoint, nsample]
         for i, conv in enumerate(self.mlp_convs):
             bn = self.mlp_bns[i]
             new_points =  F.relu(bn(conv(new_points)))
 
-        new_points = torch.max(new_points, 2)[0]
-        new_xyz = new_xyz.permute(0, 2, 1)
+        new_points = torch.max(new_points, -1)[0]
         return new_xyz, new_points
 
 class FlowEmbedding(nn.Module):
@@ -255,35 +260,33 @@ class FlowEmbedding(nn.Module):
             xyz1: (batch_size, 3, npoint)
             feat1_new: (batch_size, mlp[-1], npoint)
         """
-        pos1 = pos1.permute(0, 2, 1).contiguous()
-        pos2 = pos2.permute(0, 2, 1).contiguous()
-        feature1 = feature1.permute(0, 2, 1).contiguous()
-        feature2 = feature2.permute(0, 2, 1).contiguous()
-        B, N, C = pos1.shape
+        pos1_t = pos1.permute(0, 2, 1).contiguous()
+        pos2_t = pos2.permute(0, 2, 1).contiguous()
+        B, N, C = pos1_t.shape
         if self.knn:
-            _, idx = knn_point(self.nsample, pos2, pos1)
+            _, idx = knn_point(self.nsample, pos2_t, pos1_t)
         else:
-            idx, cnt = query_ball_point(self.radius, self.nsample, pos2, pos1)
+            # If the ball neighborhood points are less than nsample,
+            # than use the knn neighborhood points
+            idx, cnt = query_ball_point(self.radius, self.nsample, pos2_t, pos1_t)
             # 利用knn取最近的那些点
-            _, idx_knn = knn_point(self.nsample, pos2, pos1)
+            _, idx_knn = knn_point(self.nsample, pos2_t, pos1_t)
             cnt = cnt.view(B, -1, 1).repeat(1, 1, self.nsample)
             idx = idx_knn[cnt > (self.nsample-1)]
         
-        pos2_grouped = index_points(pos2, idx)
-        pos_diff = pos2_grouped - pos1.view(B, N, 1, -1)
+        pos2_grouped = pointutils.grouping_operation(pos2, idx) # [B, 3, N, S]
+        pos_diff = pos2_grouped - pos1.view(B, -1, N, 1)    # [B, 3, N, S]
         
-        feat2_grouped = index_points(feature2, idx)
+        feat2_grouped = pointutils.grouping_operation(feature2, idx)    # [B, C, N, S]
         if self.corr_func=='concat':
-            feat_diff = torch.cat([feat2_grouped, feature1.view(B, N, 1, -1).repeat(1, 1, self.nsample, 1)], dim = -1)
+            feat_diff = torch.cat([feat2_grouped, feature1.view(B, -1, N, 1).repeat(1, 1, 1, self.nsample)], dim = 1)
         
-        feat1_new = torch.cat([pos_diff, feat_diff], dim = -1)
-        feat1_new = feat1_new.permute(0,3,1,2)  # [B, C+D*2, npoint, nsample]
+        feat1_new = torch.cat([pos_diff, feat_diff], dim = 1)  # [B, 2*C+3,N,S]
         for i, conv in enumerate(self.mlp_convs):
             bn = self.mlp_bns[i]
             feat1_new = F.relu(bn(conv(feat1_new)))
 
         feat1_new = torch.max(feat1_new, -1)[0]  # [B, mlp[-1], npoint]
-        pos1 = pos1.permute(0, 2, 1)
         return pos1, feat1_new
 
 class PointNetSetUpConv(nn.Module):
@@ -324,22 +327,21 @@ class PointNetSetUpConv(nn.Module):
 
             TODO: Add support for skip links. Study how delta(XYZ) plays a role in feature updating.
         """
-        pos1 = pos1.permute(0, 2, 1)
-        pos2 = pos2.permute(0, 2, 1)
+        pos1_t = pos1.permute(0, 2, 1)
+        pos2_t = pos2.permute(0, 2, 1)
         # feature1 = feature1.permute(0, 2, 1)
-        feature2 = feature2.permute(0, 2, 1)
-        B,N,C = pos1.shape
+        feature2_t = feature2.permute(0, 2, 1)
+        B,C,N = pos1.shape
         if self.knn:
-            _, idx = knn_point(self.nsample, pos2, pos1)
+            _, idx = knn_point(self.nsample, pos2_t, pos1_t)
         else:
-            idx, _ = query_ball_point(self.radius, self.nsample, pos2, pos1)
+            idx, _ = query_ball_point(self.radius, self.nsample, pos2_t, pos1_t)
         
-        pos2_grouped = index_points(pos2, idx)
-        pos_diff = pos2_grouped - pos1.view(B, N, 1, -1)    # [B,N1,S,3]
+        pos2_grouped = pointutils.grouping_operation(pos2, idx)
+        pos_diff = pos2_grouped - pos1.view(B, -1, N, 1)    # [B,3,N1,S]
 
-        feat2_grouped = index_points(feature2, idx)
-        feat_new = torch.cat([feat2_grouped, pos_diff], dim = -1)   # [B,N1,S,C1+3]
-        feat_new = feat_new.permute(0,3,1,2)
+        feat2_grouped = pointutils.grouping_operation(feature2, idx)
+        feat_new = torch.cat([feat2_grouped, pos_diff], dim = 1)   # [B,C1+3,N1,S]
         for conv in self.mlp1_convs:
             feat_new = conv(feat_new)
         # max pooling
@@ -374,26 +376,24 @@ class PointNetFeaturePropogation(nn.Module):
         Return:
             new_points: upsampled points data, [B, D', N]
         """
-        pos1 = pos1.permute(0, 2, 1)
-        pos2 = pos2.permute(0, 2, 1)
-        feature2 = feature2.permute(0, 2, 1)
-        B, N, C = pos1.shape
+        pos1_t = pos1.permute(0, 2, 1).contiguous()
+        pos2_t = pos2.permute(0, 2, 1).contiguous()
+        B, C, N = pos1.shape
         
-        dists = square_distance(pos1, pos2)
-        dists, idx = dists.sort(dim=-1)
-        dists, idx = dists[:, :, :3], idx[:, :, :3]  # [B, N, 3]
+        # dists = square_distance(pos1, pos2)
+        # dists, idx = dists.sort(dim=-1)
+        # dists, idx = dists[:, :, :3], idx[:, :, :3]  # [B, N, 3]
+        dists,idx = pointutils.three_nn(pos1_t,pos2_t)
         dists[dists < 1e-10] = 1e-10
         weight = 1.0 / dists
-        weight = weight / torch.sum(weight, -1).view(B, N, 1)   # [B,N,3]
-        interpolated_feat = torch.sum(index_points(feature2, idx) * weight.view(B, N, 3, 1), dim = 2) # [B,N,C]
+        weight = weight / torch.sum(weight, -1,keepdim = True)   # [B,N,3]
+        interpolated_feat = torch.sum(pointutils.grouping_operation(feature2, idx) * weight.view(B, 1, N, 3), dim = -1) # [B,C,N,3]
 
         if feature1 is not None:
-            feature1 = feature1.permute(0, 2, 1)
-            feat_new = torch.cat([feature1, interpolated_feat], -1)
+            feat_new = torch.cat([interpolated_feat, feature1], 1)
         else:
             feat_new = interpolated_feat
         
-        feat_new = feat_new.permute(0, 2, 1)
         for i, conv in enumerate(self.mlp_convs):
             bn = self.mlp_bns[i]
             feat_new = F.relu(bn(conv(feat_new)))

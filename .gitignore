@@ -4,3 +4,4 @@ checkpoints/
 build/
 dist/
 pointnet2.egg-info/
+experiment/

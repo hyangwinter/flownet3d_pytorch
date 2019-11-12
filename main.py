@@ -19,8 +19,6 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 
-# Part of the code is referred from: https://github.com/floodsung/LearningToCompare_FSL
-
 class IOStream:
     def __init__(self, path):
         self.f = open(path, 'a')
@@ -45,17 +43,24 @@ def _init_(args):
     os.system('cp model.py checkpoints' + '/' + args.exp_name + '/' + 'model.py.backup')
     os.system('cp data.py checkpoints' + '/' + args.exp_name + '/' + 'data.py.backup')
 
+def weights_init(m):
+    classname=m.__class__.__name__
+    if classname.find('Conv2d') != -1:
+        nn.init.kaiming_normal_(m.weight.data)
+    if classname.find('Conv1d') != -1:
+        nn.init.kaiming_normal_(m.weight.data)
 
 def test_one_epoch(args, net, test_loader):
     net.eval()
 
     total_loss = 0
     num_examples = 0
-    for pc1, pc2, color1, color2, flow, mask1 in tqdm(test_loader):
-        pc1 = pc1.cuda().transpose(2,1)
-        pc2 = pc2.cuda().transpose(2,1)
-        color1 = color1.cuda().transpose(2,1)
-        color2 = color2.cuda().transpose(2,1)
+    for i, data in tqdm(enumerate(test_loader), total=len(test_loader), smoothing=0.9):
+        pc1, pc2, color1, color2, flow, mask1 = data
+        pc1 = pc1.cuda().transpose(2,1).contiguous()
+        pc2 = pc2.cuda().transpose(2,1).contiguous()
+        color1 = color1.cuda().transpose(2,1).contiguous()
+        color2 = color2.cuda().transpose(2,1).contiguous()
         flow = flow.cuda()
         mask1 = mask1.cuda().float()
 
@@ -65,6 +70,7 @@ def test_one_epoch(args, net, test_loader):
         loss = torch.mean(mask1 * torch.sum((flow_pred - flow) * (flow_pred - flow), -1) / 2.0)
 
         total_loss += loss.item() * batch_size
+        
 
     return total_loss * 1.0 / num_examples
 
@@ -73,24 +79,28 @@ def train_one_epoch(args, net, train_loader, opt):
     net.train()
     num_examples = 0
     total_loss = 0
-    for pc1, pc2, color1, color2, flow, mask1 in tqdm(train_loader):
-        pc1 = pc1.cuda().transpose(2,1)
-        pc2 = pc2.cuda().transpose(2,1)
-        color1 = color1.cuda().transpose(2,1)
-        color2 = color2.cuda().transpose(2,1)
-        flow = flow.cuda()
+    for i, data in tqdm(enumerate(train_loader), total=len(train_loader), smoothing=0.9):
+        pc1, pc2, color1, color2, flow, mask1 = data
+        pc1 = pc1.cuda().transpose(2,1).contiguous()
+        pc2 = pc2.cuda().transpose(2,1).contiguous()
+        color1 = color1.cuda().transpose(2,1).contiguous()
+        color2 = color2.cuda().transpose(2,1).contiguous()
+        flow = flow.cuda().transpose(2,1).contiguous()
         mask1 = mask1.cuda().float()
 
         batch_size = pc1.size(0)
         opt.zero_grad()
         num_examples += batch_size
-        flow_pred = net(pc1, pc2, color1, color2).permute(0,2,1)
-        loss = torch.mean(mask1 * torch.sum((flow_pred - flow) * (flow_pred - flow), -1) / 2.0)
+        flow_pred = net(pc1, pc2, color1, color2)
+        loss = torch.mean(mask1 * torch.sum((flow_pred - flow) ** 2, 1) / 2.0)
         loss.backward()
 
         opt.step()
         total_loss += loss.item() * batch_size
 
+        # if (i+1) % 100 == 0:
+        #     print("batch: %d, mean loss: %f" % (i, total_loss / 100 / batch_size))
+        #     total_loss = 0
     return total_loss * 1.0 / num_examples
 
 
@@ -113,12 +123,13 @@ def train(args, net, train_loader, test_loader, boardio, textio):
 
     best_test_loss = np.inf
     for epoch in range(args.epochs):
+        scheduler.step()
         textio.cprint('==epoch: %d=='%epoch)
         train_loss = train_one_epoch(args, net, train_loader, opt)
-        textio.cprint('mean train loss: %f'%train_loss)
+        textio.cprint('mean train EPE loss: %f'%train_loss)
 
         test_loss = test_one_epoch(args, net, test_loader)
-        textio.cprint('mean test loss: %f'%test_loss)
+        textio.cprint('mean test EPE loss: %f'%test_loss)
         if best_test_loss >= test_loss:
             best_test_loss = test_loss
             textio.cprint('best test loss till now: %f'%test_loss)
@@ -126,7 +137,7 @@ def train(args, net, train_loader, test_loader, boardio, textio):
                 torch.save(net.module.state_dict(), 'checkpoints/%s/models/model.best.t7' % args.exp_name)
             else:
                 torch.save(net.state_dict(), 'checkpoints/%s/models/model.best.t7' % args.exp_name)
-        scheduler.step()
+        
         # if torch.cuda.device_count() > 1:
         #     torch.save(net.module.state_dict(), 'checkpoints/%s/models/model.%d.t7' % (args.exp_name, epoch))
         # else:
@@ -148,11 +159,11 @@ def main():
                         help='Dropout ratio in transformer')
     parser.add_argument('--batch_size', type=int, default=32, metavar='batch_size',
                         help='Size of batch)')
-    parser.add_argument('--test_batch_size', type=int, default=32, metavar='batch_size',
+    parser.add_argument('--test_batch_size', type=int, default=10, metavar='batch_size',
                         help='Size of batch)')
     parser.add_argument('--epochs', type=int, default=250, metavar='N',
                         help='number of episode to train ')
-    parser.add_argument('--use_sgd', action='store_true', default=False,
+    parser.add_argument('--use_sgd', action='store_true', default=True,
                         help='Use SGD')
     parser.add_argument('--lr', type=float, default=0.001, metavar='LR',
                         help='learning rate (default: 0.001, 0.1 if using sgd)')
@@ -179,7 +190,7 @@ def main():
                         help='Pretrained model path')
 
     args = parser.parse_args()
-
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
     # CUDA settings
     torch.backends.cudnn.deterministic = True
     torch.manual_seed(args.seed)
@@ -214,6 +225,7 @@ def main():
 
     if args.model == 'flownet':
         net = FlowNet3D(args).cuda()
+        net.apply(weights_init)
         if args.eval:
             if args.model_path is '':
                 model_path = 'checkpoints' + '/' + args.exp_name + '/models/model.best.t7'

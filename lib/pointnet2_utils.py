@@ -166,7 +166,7 @@ class GroupingOperation(Function):
         """
         assert features.is_contiguous()
         assert idx.is_contiguous()
-
+        idx = idx.int()
         B, nfeatures, nsample = idx.size()
         _, C, N = features.size()
         output = torch.cuda.FloatTensor(B, C, nfeatures, nsample)

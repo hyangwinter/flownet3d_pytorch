@@ -18,9 +18,9 @@ class FlowNet3D(nn.Module):
         self.fe_layer = FlowEmbedding(radius=10.0, nsample=64, in_channel = 128, mlp=[128, 128, 128], pooling='max', corr_func='concat')
         
         self.su1 = PointNetSetUpConv(nsample=8, radius=2.4, f1_channel = 256, f2_channel = 512, mlp=[], mlp2=[256, 256])
-        self.su2 = PointNetSetUpConv(nsample=8, radius=1.2, f1_channel = 128+3, f2_channel = 256, mlp=[128, 128, 256], mlp2=[256])
+        self.su2 = PointNetSetUpConv(nsample=8, radius=1.2, f1_channel = 128+128, f2_channel = 256, mlp=[128, 128, 256], mlp2=[256])
         self.su3 = PointNetSetUpConv(nsample=8, radius=0.6, f1_channel = 64, f2_channel = 256, mlp=[128, 128, 256], mlp2=[256])
-        self.fp = PointNetFeaturePropogation(in_channel = 256, mlp = [256, 256])
+        self.fp = PointNetFeaturePropogation(in_channel = 256+3, mlp = [256, 256])
         
         self.conv1 = nn.Conv1d(256, 128, kernel_size=1, bias=False)
         self.bn1 = nn.BatchNorm1d(128)
@@ -39,9 +39,9 @@ class FlowNet3D(nn.Module):
         l4_pc1, l4_feature1 = self.sa4(l3_pc1, l3_feature1)
         
         l3_fnew1 = self.su1(l3_pc1, l4_pc1, l3_feature1, l4_feature1)
-        l2_fnew1 = self.su2(l2_pc1, l3_pc1, torch.cat([l2_pc2, l2_feature1_new], dim=1), l3_fnew1)
+        l2_fnew1 = self.su2(l2_pc1, l3_pc1, torch.cat([l2_feature1, l2_feature1_new], dim=1), l3_fnew1)
         l1_fnew1 = self.su3(l1_pc1, l2_pc1, l1_feature1, l2_fnew1)
-        l0_fnew1 = self.fp(pc1, l1_pc1, None, l1_fnew1)
+        l0_fnew1 = self.fp(pc1, l1_pc1, feature1, l1_fnew1)
         
         x = F.relu(self.bn1(self.conv1(l0_fnew1)))
         sf = self.conv2(x)

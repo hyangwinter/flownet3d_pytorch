@@ -181,6 +181,9 @@ class SceneflowDataset(Dataset):
             flow = flow[:self.npoints, :]
             mask1 = mask1[:self.npoints]
 
+        pos1_center = np.mean(pos1, 0)
+        pos1 -= pos1_center
+        pos2 -= pos1_center
 
         return pos1, pos2, color1, color2, flow, mask1
 
