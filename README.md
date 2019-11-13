@@ -30,3 +30,18 @@ Then run the following command to train:
 python main.py --exp_name=flownet3d --dataset_path=xx/yy
 ```
 where xx/yy is the dataset path
+
+## Performance comparison
+All of the following experiments were tested on a TITAN RTX
+
+1. GPU memory usage:
+
+batch size|flownet3d(GB)|flownet3d_pytorch(GB)
+---|---|---
+16|16.9|6.0
+
+2. Training time per epoch on Flyingthings3d dataset:
+
+batch size|flownet3d(min)|flownet3d_pytorch(min)
+---|---|---
+16|6.7|3.9
