@@ -154,7 +154,8 @@ def main():
                         help='Model to use, [flownet]')
     parser.add_argument('--emb_dims', type=int, default=512, metavar='N',
                         help='Dimension of embeddings')
-    parser.add_argument('--num_point', type=int, default=2048, help='Point Number [default: 2048]')
+    parser.add_argument('--num_points', type=int, default=2048,
+                        help='Point Number [default: 2048]')
     parser.add_argument('--dropout', type=float, default=0.5, metavar='N',
                         help='Dropout ratio in transformer')
     parser.add_argument('--batch_size', type=int, default=32, metavar='batch_size',
@@ -181,10 +182,10 @@ def main():
                         help='Wheter to add gaussian noise')
     parser.add_argument('--unseen', type=bool, default=False, metavar='N',
                         help='Whether to test on unseen category')
-    parser.add_argument('--num_points', type=int, default=2048, metavar='N',
-                        help='Num of points to use')
     parser.add_argument('--dataset', type=str, default='SceneflowDataset',
                         choices=['SceneflowDataset'], metavar='N',
+                        help='dataset to use')
+    parser.add_argument('--dataset_path', type=str, default='../../datasets/data_processed_maxcut_35_20k_2k_8192', metavar='N',
                         help='dataset to use')
     parser.add_argument('--model_path', type=str, default='', metavar='N',
                         help='Pretrained model path')
@@ -215,10 +216,10 @@ def main():
             batch_size=args.test_batch_size, shuffle=False, drop_last=False)
     elif args.dataset == 'SceneflowDataset':
         train_loader = DataLoader(
-            SceneflowDataset(npoints=args.num_points, root = '../../datasets/data_processed_maxcut_35_20k_2k_8192', partition='train'),
+            SceneflowDataset(npoints=args.num_points, root = args.dataset_path, partition='train'),
             batch_size=args.batch_size, shuffle=True, drop_last=True)
         test_loader = DataLoader(
-            SceneflowDataset(npoints=args.num_points, root = '../../datasets/data_processed_maxcut_35_20k_2k_8192', partition='test'),
+            SceneflowDataset(npoints=args.num_points, root = args.dataset_path, partition='test'),
             batch_size=args.test_batch_size, shuffle=False, drop_last=False)
     else:
         raise Exception("not implemented")

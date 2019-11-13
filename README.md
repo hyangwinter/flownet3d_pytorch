@@ -1,5 +1,5 @@
 # flownet3d_pytorch
-The pytorch implementation of [flownet3d]() based on [WangYueFt/dcp](https://github.com/WangYueFt/dcp), [sshaoshuai/Pointnet2.PyTorch](https://github.com/sshaoshuai/Pointnet2.PyTorch) and [yanx27/Pointnet_Pointnet2_pytorch](https://github.com/yanx27/Pointnet_Pointnet2_pytorch)
+The pytorch implementation of [flownet3d](https://github.com/xingyul/flownet3d) based on [WangYueFt/dcp](https://github.com/WangYueFt/dcp), [sshaoshuai/Pointnet2.PyTorch](https://github.com/sshaoshuai/Pointnet2.PyTorch) and [yanx27/Pointnet_Pointnet2_pytorch](https://github.com/yanx27/Pointnet_Pointnet2_pytorch)
 
 ## Installation
 
@@ -38,10 +38,10 @@ All of the following experiments were tested on a TITAN RTX
 
 batch size|flownet3d(GB)|flownet3d_pytorch(GB)
 ---|---|---
-16|16.9|6.0
+16|16.9|9.1
 
 2. Training time per epoch on Flyingthings3d dataset:
 
 batch size|flownet3d(min)|flownet3d_pytorch(min)
 ---|---|---
-16|6.7|3.9
+16|6.7|3.4

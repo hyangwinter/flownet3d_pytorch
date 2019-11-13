@@ -13,6 +13,12 @@ void three_nn_wrapper_fast(int b, int n, int m, at::Tensor unknown_tensor,
 void three_nn_kernel_launcher_fast(int b, int n, int m, const float *unknown,
 	const float *known, float *dist2, int *idx, cudaStream_t stream);
 
+void knn_wrapper_fast(int b, int n, int m, int k, at::Tensor unknown_tensor, 
+  at::Tensor known_tensor, at::Tensor dist2_tensor, at::Tensor idx_tensor);
+
+void knn_kernel_launcher_fast(int b, int n, int m, int k, const float *unknown,
+	const float *known, float *dist2, int *idx, cudaStream_t stream);
+
 
 void three_interpolate_wrapper_fast(int b, int c, int m, int n, at::Tensor points_tensor, 
     at::Tensor idx_tensor, at::Tensor weight_tensor, at::Tensor out_tensor);
