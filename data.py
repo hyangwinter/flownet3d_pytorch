@@ -110,7 +110,7 @@ class ModelNet40(Dataset):
         translation_ba = -R_ba.dot(translation_ab)
 
         pointcloud1 = pointcloud.T
-        # 变换点云，为什么这里不直接用R_ab，而是要从欧拉角重新生成旋转矩阵？？？？
+        
         rotation_ab = Rotation.from_euler('zyx', [anglez, angley, anglex])
         pointcloud2 = rotation_ab.apply(pointcloud1.T).T + np.expand_dims(translation_ab, axis=1)
 
@@ -153,8 +153,8 @@ class SceneflowDataset(Dataset):
                 data = np.load(fp)
                 pos1 = data['points1'].astype('float32')
                 pos2 = data['points2'].astype('float32')
-                color1 = data['color1'].astype('float32') / 255
-                color2 = data['color2'].astype('float32') / 255
+                color1 = data['color1'].astype('float32')
+                color2 = data['color2'].astype('float32')
                 flow = data['flow'].astype('float32')
                 mask1 = data['valid_mask1']
 
