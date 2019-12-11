@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.optim.lr_scheduler import MultiStepLR
+from torch.optim.lr_scheduler import MultiStepLR, StepLR
 from data import ModelNet40, SceneflowDataset
 from model import FlowNet3D
 import numpy as np
@@ -55,7 +55,7 @@ def test_one_epoch(args, net, test_loader):
 
     total_loss = 0
     num_examples = 0
-    for i, data in tqdm(enumerate(test_loader), total=len(test_loader), smoothing=0.9):
+    for i, data in tqdm(enumerate(test_loader), total = len(test_loader)):
         pc1, pc2, color1, color2, flow, mask1 = data
         pc1 = pc1.cuda().transpose(2,1).contiguous()
         pc2 = pc2.cuda().transpose(2,1).contiguous()
@@ -79,7 +79,7 @@ def train_one_epoch(args, net, train_loader, opt):
     net.train()
     num_examples = 0
     total_loss = 0
-    for i, data in tqdm(enumerate(train_loader), total=len(train_loader), smoothing=0.9):
+    for i, data in tqdm(enumerate(train_loader), total = len(train_loader)):
         pc1, pc2, color1, color2, flow, mask1 = data
         pc1 = pc1.cuda().transpose(2,1).contiguous()
         pc2 = pc2.cuda().transpose(2,1).contiguous()
@@ -119,12 +119,12 @@ def train(args, net, train_loader, test_loader, boardio, textio):
     else:
         print("Use Adam")
         opt = optim.Adam(net.parameters(), lr=args.lr, weight_decay=1e-4)
-    scheduler = MultiStepLR(opt, milestones=[75, 150, 200], gamma=0.1)
+    # scheduler = MultiStepLR(opt, milestones=[75, 150, 200], gamma=0.1)
+    scheduler = StepLR(opt, 10, gamma = 0.7)
 
     best_test_loss = np.inf
     for epoch in range(args.epochs):
-        scheduler.step()
-        textio.cprint('==epoch: %d=='%epoch)
+        textio.cprint('==epoch: %d, learning rate: %f=='%(epoch, opt.param_groups[0]['lr']))
         train_loss = train_one_epoch(args, net, train_loader, opt)
         textio.cprint('mean train EPE loss: %f'%train_loss)
 
@@ -138,6 +138,7 @@ def train(args, net, train_loader, test_loader, boardio, textio):
             else:
                 torch.save(net.state_dict(), 'checkpoints/%s/models/model.best.t7' % args.exp_name)
         
+        scheduler.step()
         # if torch.cuda.device_count() > 1:
         #     torch.save(net.module.state_dict(), 'checkpoints/%s/models/model.%d.t7' % (args.exp_name, epoch))
         # else:
@@ -147,14 +148,14 @@ def train(args, net, train_loader, test_loader, boardio, textio):
 
 def main():
     parser = argparse.ArgumentParser(description='Point Cloud Registration')
-    parser.add_argument('--exp_name', type=str, default='exp', metavar='N',
+    parser.add_argument('--exp_name', type=str, default='test', metavar='N',
                         help='Name of the experiment')
     parser.add_argument('--model', type=str, default='flownet', metavar='N',
                         choices=['flownet'],
                         help='Model to use, [flownet]')
     parser.add_argument('--emb_dims', type=int, default=512, metavar='N',
                         help='Dimension of embeddings')
-    parser.add_argument('--num_point', type=int, default=2048, help='Point Number [default: 2048]')
+    parser.add_argument('--num_points', type=int, default=2048, help='Point Number [default: 2048]')
     parser.add_argument('--dropout', type=float, default=0.5, metavar='N',
                         help='Dropout ratio in transformer')
     parser.add_argument('--batch_size', type=int, default=32, metavar='batch_size',
@@ -163,7 +164,7 @@ def main():
                         help='Size of batch)')
     parser.add_argument('--epochs', type=int, default=250, metavar='N',
                         help='number of episode to train ')
-    parser.add_argument('--use_sgd', action='store_true', default=True,
+    parser.add_argument('--use_sgd', action='store_true', default=False,
                         help='Use SGD')
     parser.add_argument('--lr', type=float, default=0.001, metavar='LR',
                         help='learning rate (default: 0.001, 0.1 if using sgd)')
@@ -181,16 +182,16 @@ def main():
                         help='Wheter to add gaussian noise')
     parser.add_argument('--unseen', type=bool, default=False, metavar='N',
                         help='Whether to test on unseen category')
-    parser.add_argument('--num_points', type=int, default=2048, metavar='N',
-                        help='Num of points to use')
     parser.add_argument('--dataset', type=str, default='SceneflowDataset',
                         choices=['SceneflowDataset'], metavar='N',
+                        help='dataset to use')
+    parser.add_argument('--dataset_path', type=str, default='../../datasets/data_processed_maxcut_35_20k_2k_8192', metavar='N',
                         help='dataset to use')
     parser.add_argument('--model_path', type=str, default='', metavar='N',
                         help='Pretrained model path')
 
     args = parser.parse_args()
-    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+    # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
     # CUDA settings
     torch.backends.cudnn.deterministic = True
     torch.manual_seed(args.seed)
@@ -215,10 +216,10 @@ def main():
             batch_size=args.test_batch_size, shuffle=False, drop_last=False)
     elif args.dataset == 'SceneflowDataset':
         train_loader = DataLoader(
-            SceneflowDataset(npoints=args.num_points, root = '../../datasets/data_processed_maxcut_35_20k_2k_8192', partition='train'),
+            SceneflowDataset(npoints=args.num_points, root = args.dataset_path, partition='train'),
             batch_size=args.batch_size, shuffle=True, drop_last=True)
         test_loader = DataLoader(
-            SceneflowDataset(npoints=args.num_points, root = '../../datasets/data_processed_maxcut_35_20k_2k_8192', partition='test'),
+            SceneflowDataset(npoints=args.num_points, root = args.dataset_path, partition='test'),
             batch_size=args.test_batch_size, shuffle=False, drop_last=False)
     else:
         raise Exception("not implemented")
