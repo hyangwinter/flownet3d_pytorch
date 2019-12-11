@@ -6,6 +6,78 @@
 #include "interpolate_gpu.h"
 
 
+__global__ void knn_kernel_fast(int b, int n, int m, int k, const float *__restrict__ unknown, 
+    const float *__restrict__ known, float *__restrict__ dist2, int *__restrict__ idx) {
+    // unknown: (B, N, 3)
+    // known: (B, M, 3)
+    // output: 
+    //      dist2: (B, N, k)
+    //      idx: (B, N, k)
+    
+    int bs_idx = blockIdx.y;
+    int pt_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (bs_idx >= b || pt_idx >= n) return;
+
+    unknown += bs_idx * n * 3 + pt_idx * 3;
+    known += bs_idx * m * 3;
+    dist2 += bs_idx * n * k + pt_idx * k;
+    idx += bs_idx * n * k + pt_idx * k;
+
+    float ux = unknown[0];
+    float uy = unknown[1];
+    float uz = unknown[2];
+
+    double best[200];
+    int besti[200];
+    for(int i = 0; i < k; i++){
+        best[i] = 1e40;
+        besti[i] = 0;
+    }
+    for (int i = 0; i < m; ++i) {
+        float x = known[i * 3 + 0];
+        float y = known[i * 3 + 1];
+        float z = known[i * 3 + 2];
+        float d = (ux - x) * (ux - x) + (uy - y) * (uy - y) + (uz - z) * (uz - z);
+        for(int j = 0; j < k; j++){
+            if(d < best[j]){
+                for(int l = k - 1; l > j; l--){
+                    best[l] = best[l - 1];
+                    besti[l] = besti[l - 1];
+                }
+                best[j] = d;
+                besti[j] = i;
+                break;
+            }
+        }
+    }
+    for(int i = 0; i < k; i++){
+        idx[i] = besti[i];
+        dist2[i] = best[i];
+    }
+}
+
+
+void knn_kernel_launcher_fast(int b, int n, int m, int k, const float *unknown, 
+    const float *known, float *dist2, int *idx, cudaStream_t stream) {
+    // unknown: (B, N, 3)
+    // known: (B, M, 3)
+    // output: 
+    //      dist2: (B, N, k)
+    //      idx: (B, N, k)
+
+    cudaError_t err;
+    dim3 blocks(DIVUP(n, THREADS_PER_BLOCK), b);  // blockIdx.x(col), blockIdx.y(row)
+    dim3 threads(THREADS_PER_BLOCK);
+
+    knn_kernel_fast<<<blocks, threads, 0, stream>>>(b, n, m, k, unknown, known, dist2, idx);
+
+    err = cudaGetLastError();
+    if (cudaSuccess != err) {
+        fprintf(stderr, "CUDA kernel failed : %s\n", cudaGetErrorString(err));
+        exit(-1);
+    }
+}
+
 __global__ void three_nn_kernel_fast(int b, int n, int m, const float *__restrict__ unknown, 
     const float *__restrict__ known, float *__restrict__ dist2, int *__restrict__ idx) {
     // unknown: (B, N, 3)

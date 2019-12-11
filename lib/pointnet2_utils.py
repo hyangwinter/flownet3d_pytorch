@@ -72,6 +72,34 @@ class GatherOperation(Function):
 
 gather_operation = GatherOperation.apply
 
+class KNN(Function):
+
+    @staticmethod
+    def forward(ctx, k: int, unknown: torch.Tensor, known: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Find the three nearest neighbors of unknown in known
+        :param ctx:
+        :param unknown: (B, N, 3)
+        :param known: (B, M, 3)
+        :return:
+            dist: (B, N, k) l2 distance to the three nearest neighbors
+            idx: (B, N, k) index of 3 nearest neighbors
+        """
+        assert unknown.is_contiguous()
+        assert known.is_contiguous()
+
+        B, N, _ = unknown.size()
+        m = known.size(1)
+        dist2 = torch.cuda.FloatTensor(B, N, k)
+        idx = torch.cuda.IntTensor(B, N, k)
+
+        pointnet2.knn_wrapper(B, N, m, k, unknown, known, dist2, idx)
+        return torch.sqrt(dist2), idx
+
+    @staticmethod
+    def backward(ctx, a=None, b=None):
+        return None, None, None
+knn = KNN.apply
 
 class ThreeNN(Function):
 

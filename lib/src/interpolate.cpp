@@ -22,6 +22,17 @@ void three_nn_wrapper_fast(int b, int n, int m, at::Tensor unknown_tensor,
     three_nn_kernel_launcher_fast(b, n, m, unknown, known, dist2, idx, stream);
 }
 
+void knn_wrapper_fast(int b, int n, int m, int k, at::Tensor unknown_tensor, 
+    at::Tensor known_tensor, at::Tensor dist2_tensor, at::Tensor idx_tensor) {
+    const float *unknown = unknown_tensor.data<float>();
+    const float *known = known_tensor.data<float>();
+    float *dist2 = dist2_tensor.data<float>();
+    int *idx = idx_tensor.data<int>();
+
+    cudaStream_t stream = THCState_getCurrentStream(state);
+    knn_kernel_launcher_fast(b, n, m, k, unknown, known, dist2, idx, stream);
+}
+
 
 void three_interpolate_wrapper_fast(int b, int c, int m, int n,
                          at::Tensor points_tensor,

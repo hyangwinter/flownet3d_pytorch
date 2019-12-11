@@ -130,7 +130,7 @@ def knn_point(k, pos1, pos2):
     pos2 = pos2.view(B,M,1,-1).repeat(1,1,N,1)
     dist = torch.sum(-(pos1-pos2)**2,-1)
     val,idx = dist.topk(k=k,dim = -1)
-    return -val, idx
+    return torch.sqrt(-val), idx
 
 
 def query_ball_point(radius, nsample, xyz, new_xyz):
@@ -298,13 +298,13 @@ class FlowEmbedding(nn.Module):
         pos2_t = pos2.permute(0, 2, 1).contiguous()
         B, N, C = pos1_t.shape
         if self.knn:
-            _, idx = knn_point(self.nsample, pos2_t, pos1_t)
+            _, idx = pointutils.knn(self.nsample, pos1_t, pos2_t)
         else:
             # If the ball neighborhood points are less than nsample,
             # than use the knn neighborhood points
             idx, cnt = query_ball_point(self.radius, self.nsample, pos2_t, pos1_t)
             # 利用knn取最近的那些点
-            _, idx_knn = knn_point(self.nsample, pos2_t, pos1_t)
+            _, idx_knn = pointutils.knn(self.nsample, pos1_t, pos2_t)
             cnt = cnt.view(B, -1, 1).repeat(1, 1, self.nsample)
             idx = idx_knn[cnt > (self.nsample-1)]
         
@@ -361,13 +361,11 @@ class PointNetSetUpConv(nn.Module):
 
             TODO: Add support for skip links. Study how delta(XYZ) plays a role in feature updating.
         """
-        pos1_t = pos1.permute(0, 2, 1)
-        pos2_t = pos2.permute(0, 2, 1)
-        # feature1 = feature1.permute(0, 2, 1)
-        feature2_t = feature2.permute(0, 2, 1)
+        pos1_t = pos1.permute(0, 2, 1).contiguous()
+        pos2_t = pos2.permute(0, 2, 1).contiguous()
         B,C,N = pos1.shape
         if self.knn:
-            _, idx = knn_point(self.nsample, pos2_t, pos1_t)
+            _, idx = pointutils.knn(self.nsample, pos1_t, pos2_t)
         else:
             idx, _ = query_ball_point(self.radius, self.nsample, pos2_t, pos1_t)
         

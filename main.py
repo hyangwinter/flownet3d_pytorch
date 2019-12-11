@@ -155,7 +155,8 @@ def main():
                         help='Model to use, [flownet]')
     parser.add_argument('--emb_dims', type=int, default=512, metavar='N',
                         help='Dimension of embeddings')
-    parser.add_argument('--num_points', type=int, default=2048, help='Point Number [default: 2048]')
+    parser.add_argument('--num_points', type=int, default=2048,
+                        help='Point Number [default: 2048]')
     parser.add_argument('--dropout', type=float, default=0.5, metavar='N',
                         help='Dropout ratio in transformer')
     parser.add_argument('--batch_size', type=int, default=32, metavar='batch_size',
