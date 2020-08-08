@@ -50,10 +50,30 @@ def weights_init(m):
     if classname.find('Conv1d') != -1:
         nn.init.kaiming_normal_(m.weight.data)
 
+def scene_flow_EPE_np(pred, labels, mask):
+    error = np.sqrt(np.sum((pred - labels)**2, 2) + 1e-20)
+
+    gtflow_len = np.sqrt(np.sum(labels*labels, 2) + 1e-20) # B,N
+    acc1 = np.sum(np.logical_or((error <= 0.05)*mask, (error/gtflow_len <= 0.05)*mask), axis=1)
+    acc2 = np.sum(np.logical_or((error <= 0.1)*mask, (error/gtflow_len <= 0.1)*mask), axis=1)
+
+    mask_sum = np.sum(mask, 1)
+    acc1 = acc1[mask_sum > 0] / mask_sum[mask_sum > 0]
+    acc1 = np.mean(acc1)
+    acc2 = acc2[mask_sum > 0] / mask_sum[mask_sum > 0]
+    acc2 = np.mean(acc2)
+
+    EPE = np.sum(error * mask, 1)[mask_sum > 0] / mask_sum[mask_sum > 0]
+    EPE = np.mean(EPE)
+    return EPE, acc1, acc2
+
 def test_one_epoch(args, net, test_loader):
     net.eval()
 
     total_loss = 0
+    total_epe = 0
+    total_acc3d = 0
+    total_acc3d_2 = 0
     num_examples = 0
     for i, data in tqdm(enumerate(test_loader), total = len(test_loader)):
         pc1, pc2, color1, color2, flow, mask1 = data
@@ -68,11 +88,16 @@ def test_one_epoch(args, net, test_loader):
         num_examples += batch_size
         flow_pred = net(pc1, pc2, color1, color2).permute(0,2,1)
         loss = torch.mean(mask1 * torch.sum((flow_pred - flow) * (flow_pred - flow), -1) / 2.0)
+        epe_3d, acc_3d, acc_3d_2 = scene_flow_EPE_np(flow_pred.detach().cpu().numpy(), flow.detach().cpu().numpy(), mask1.detach().cpu().numpy())
+        total_epe += epe_3d * batch_size
+        total_acc3d += acc_3d * batch_size
+        total_acc3d_2+=acc_3d_2*batch_size
+        # print('batch EPE 3D: %f\tACC 3D: %f\tACC 3D 2: %f' % (epe_3d, acc_3d, acc_3d_2))
 
         total_loss += loss.item() * batch_size
         
 
-    return total_loss * 1.0 / num_examples
+    return total_loss * 1.0 / num_examples, total_epe * 1.0 / num_examples, total_acc3d * 1.0 / num_examples, total_acc3d_2 * 1.0 / num_examples
 
 
 def train_one_epoch(args, net, train_loader, opt):
@@ -106,10 +131,10 @@ def train_one_epoch(args, net, train_loader, opt):
 
 def test(args, net, test_loader, boardio, textio):
 
-    test_loss = test_one_epoch(args, net, test_loader)
+    test_loss, epe, acc, acc_2 = test_one_epoch(args, net, test_loader)
 
     textio.cprint('==FINAL TEST==')
-    textio.cprint('mean test loss: %f'%test_loss)
+    textio.cprint('mean test loss: %f\tEPE 3D: %f\tACC 3D: %f\tACC 3D 2: %f'%(test_loss, epe, acc, acc_2))
 
 
 def train(args, net, train_loader, test_loader, boardio, textio):
@@ -128,8 +153,8 @@ def train(args, net, train_loader, test_loader, boardio, textio):
         train_loss = train_one_epoch(args, net, train_loader, opt)
         textio.cprint('mean train EPE loss: %f'%train_loss)
 
-        test_loss = test_one_epoch(args, net, test_loader)
-        textio.cprint('mean test EPE loss: %f'%test_loss)
+        test_loss, epe, acc, acc_2 = test_one_epoch(args, net, test_loader)
+        textio.cprint('mean test loss: %f\tEPE 3D: %f\tACC 3D: %f\tACC 3D 2: %f'%(test_loss, epe, acc, acc_2))
         if best_test_loss >= test_loss:
             best_test_loss = test_loss
             textio.cprint('best test loss till now: %f'%test_loss)
@@ -148,7 +173,7 @@ def train(args, net, train_loader, test_loader, boardio, textio):
 
 def main():
     parser = argparse.ArgumentParser(description='Point Cloud Registration')
-    parser.add_argument('--exp_name', type=str, default='test', metavar='N',
+    parser.add_argument('--exp_name', type=str, default='exp', metavar='N',
                         help='Name of the experiment')
     parser.add_argument('--model', type=str, default='flownet', metavar='N',
                         choices=['flownet'],
@@ -159,9 +184,9 @@ def main():
                         help='Point Number [default: 2048]')
     parser.add_argument('--dropout', type=float, default=0.5, metavar='N',
                         help='Dropout ratio in transformer')
-    parser.add_argument('--batch_size', type=int, default=32, metavar='batch_size',
+    parser.add_argument('--batch_size', type=int, default=64, metavar='batch_size',
                         help='Size of batch)')
-    parser.add_argument('--test_batch_size', type=int, default=10, metavar='batch_size',
+    parser.add_argument('--test_batch_size', type=int, default=32, metavar='batch_size',
                         help='Size of batch)')
     parser.add_argument('--epochs', type=int, default=250, metavar='N',
                         help='number of episode to train ')
@@ -192,7 +217,7 @@ def main():
                         help='Pretrained model path')
 
     args = parser.parse_args()
-    # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+    # os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
     # CUDA settings
     torch.backends.cudnn.deterministic = True
     torch.manual_seed(args.seed)
